@@ -6,23 +6,17 @@
     <title>Rent Manager Pro - Akash Sheikh</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        input {
-            min-height: 45px;
-            font-size: 16px !important;
-            padding: 8px !important;
-        }
-        th, td {
-            min-width: 120px;
-        }
-        .send-btn {
-            min-width: 60px;
-            height: 40px;
-        }
+        input { min-height: 45px; font-size: 16px !important; padding: 8px !important; }
+        th, td { min-width: 120px; }
+        .send-btn { min-width: 60px; height: 40px; }
+        .status-full { background-color: #d1fae5 !important; } 
+        .status-partial { background-color: #fef3c7 !important; } 
+        .status-due { background-color: #fee2e2 !important; } 
     </style>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyCvb5-ucESesD-wkDbXCunBOk1mcf-U-yQ",
@@ -49,11 +43,27 @@
             if (user) {
                 document.getElementById('auth-page').classList.add('hidden');
                 document.getElementById('main-app').classList.remove('hidden');
+                setupYearOptions(); // বছর লোড করা
             } else {
                 document.getElementById('auth-page').classList.remove('hidden');
                 document.getElementById('main-app').classList.add('hidden');
             }
         });
+
+        // ৫০ বছরের লিস্ট এবং বর্তমান বছর সিলেক্ট করার ফাংশন
+        function setupYearOptions() {
+            const yearSelect = document.getElementById('year');
+            const currentYear = new Date().getFullYear();
+            yearSelect.innerHTML = ""; 
+            for (let i = 0; i <= 50; i++) {
+                const year = currentYear + i;
+                const option = document.createElement('option');
+                option.value = year;
+                option.text = year;
+                if (year === currentYear) option.selected = true;
+                yearSelect.appendChild(option);
+            }
+        }
 
         window.logout = () => signOut(auth);
 
@@ -67,6 +77,7 @@
         window.openMonth = (m) => {
             curMonth = m;
             document.getElementById('month-sec').classList.add('hidden');
+            document.getElementById('due-summary-sec').classList.add('hidden');
             document.getElementById('table-sec').classList.remove('hidden');
             document.getElementById('title').innerText = `${m} - ${curYear}`;
             loadData();
@@ -75,6 +86,7 @@
         window.addRoom = () => {
             const tbody = document.getElementById('rows');
             const tr = document.createElement('tr');
+            tr.className = "status-due"; 
             tr.innerHTML = `
                 <td class="border p-2"><input type="text" placeholder="রুম নং" class="w-full border rounded room"></td>
                 <td class="border p-2"><input type="text" placeholder="নাম" class="w-full border rounded name"></td>
@@ -92,12 +104,17 @@
             const row = el.closest('tr');
             const rent = parseFloat(row.querySelector('.rent').value) || 0;
             const rec = parseFloat(row.querySelector('.rec').value) || 0;
-            row.querySelector('.due').value = rent - rec;
+            const due = rent - rec;
+            row.querySelector('.due').value = due;
+
+            row.classList.remove('status-full', 'status-partial', 'status-due');
+            if (rent > 0 && due <= 0) row.classList.add('status-full');
+            else if (rec > 0 && due > 0) row.classList.add('status-partial');
+            else row.classList.add('status-due');
         };
 
         window.send = (btn) => {
             const r = btn.closest('tr');
-            // মেসেজের শেষে আপনার নাম যোগ করা হয়েছে
             const msg = `রুম: ${r.querySelector('.room').value}, ভাড়াটিয়া: ${r.querySelector('.name').value}, মাস: ${curMonth}, ভাড়া: ${r.querySelector('.rent').value}, জমা: ${r.querySelector('.rec').value}, বকেয়া: ${r.querySelector('.due').value}। ধন্যবাদ। - Created by Akash Sheikh`;
             window.location.href = `sms:${r.querySelector('.mobile').value}?body=${encodeURIComponent(msg)}`;
         };
@@ -118,7 +135,7 @@
                 });
             });
             const id = `${auth.currentUser.uid}_${curYear}_${curMonth}`;
-            await setDoc(doc(db, "data", id), { rows });
+            await setDoc(doc(db, "data", id), { rows, month: curMonth, year: curYear });
             btn.innerText = "সেভ (Cloud)";
             alert("সব তথ্য নিরাপদে সেভ হয়েছে!");
         };
@@ -131,6 +148,13 @@
             if(snap.exists()) {
                 snap.data().rows.forEach(d => {
                     const tr = document.createElement('tr');
+                    const dueVal = parseFloat(d.due) || 0;
+                    const rentVal = parseFloat(d.rent) || 0;
+                    const recVal = parseFloat(d.rec) || 0;
+                    if (rentVal > 0 && dueVal <= 0) tr.className = "status-full";
+                    else if (recVal > 0 && dueVal > 0) tr.className = "status-partial";
+                    else tr.className = "status-due";
+
                     tr.innerHTML = `
                         <td class="border p-2"><input type="text" class="w-full border rounded room" value="${d.room}"></td>
                         <td class="border p-2"><input type="text" class="w-full border rounded name" value="${d.name}"></td>
@@ -145,6 +169,36 @@
                 });
             }
         }
+
+        window.showDueSummary = async () => {
+            document.getElementById('month-sec').classList.add('hidden');
+            document.getElementById('table-sec').classList.add('hidden');
+            document.getElementById('due-summary-sec').classList.remove('hidden');
+            const dueList = document.getElementById('due-list');
+            dueList.innerHTML = "লোড হচ্ছে...";
+            const querySnapshot = await getDocs(collection(db, "data"));
+            dueList.innerHTML = "";
+            querySnapshot.forEach((doc) => {
+                if(doc.id.startsWith(auth.currentUser.uid)) {
+                    const data = doc.data();
+                    data.rows.forEach(row => {
+                        if(parseFloat(row.due) > 0) {
+                            const div = document.createElement('div');
+                            div.className = "bg-white p-4 mb-2 rounded-lg shadow border-l-4 border-red-500 flex justify-between items-center";
+                            div.innerHTML = `
+                                <div>
+                                    <p class="font-bold text-blue-800">রুম: ${row.room} | ${row.name}</p>
+                                    <p class="text-sm text-gray-600">মাস: ${data.month} ${data.year} | বকেয়া: <span class="text-red-600 font-bold">${row.due} TK</span></p>
+                                </div>
+                                <button onclick="curYear='${data.year}'; openMonth('${data.month}')" class="bg-blue-100 text-blue-600 px-3 py-1 rounded text-sm font-bold">পরিশোধ করুন</button>
+                            `;
+                            dueList.appendChild(div);
+                        }
+                    });
+                }
+            });
+            if(dueList.innerHTML === "") dueList.innerHTML = "<p class='text-center text-green-600 font-bold'>কোন বকেয়া নেই! 😊</p>";
+        };
     </script>
 </head>
 <body class="bg-blue-50 font-sans">
@@ -163,16 +217,26 @@
         <div class="max-w-6xl mx-auto">
             <div class="flex justify-between items-center mb-6 bg-white p-4 rounded-xl shadow">
                 <h2 class="text-xl font-bold text-blue-700">আমার ড্যাশবোর্ড</h2>
-                <div class="text-right">
-                    <button onclick="logout()" class="bg-red-100 text-red-600 px-4 py-2 rounded-lg font-bold">লগআউট</button>
+                <div class="flex gap-2">
+                    <button onclick="showDueSummary()" class="bg-orange-500 text-white px-3 py-2 rounded-lg font-bold text-sm">বকেয়া লিস্ট</button>
+                    <button onclick="logout()" class="bg-red-100 text-red-600 px-3 py-2 rounded-lg font-bold text-sm">লগআউট</button>
+                </div>
+            </div>
+
+            <div id="due-summary-sec" class="hidden mb-6">
+                <div class="bg-white p-6 rounded-2xl shadow-lg border-t-4 border-orange-500">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-bold text-gray-700">সকল বকেয়ার তালিকা</h3>
+                        <button onclick="document.getElementById('due-summary-sec').classList.add('hidden'); document.getElementById('month-sec').classList.remove('hidden');" class="text-blue-600 font-bold">বন্ধ করুন</button>
+                    </div>
+                    <div id="due-list" class="max-h-96 overflow-y-auto"></div>
                 </div>
             </div>
 
             <div id="year-sec" class="text-center bg-white p-10 rounded-2xl shadow-lg">
-                <h3 class="text-2xl font-bold mb-6 text-gray-700">বর্তমান বছর বেছে নিন</h3>
+                <h3 class="text-2xl font-bold mb-6 text-gray-700">বছর বেছে নিন</h3>
                 <select id="year" class="w-full max-w-xs p-4 border-2 border-blue-200 rounded-xl text-xl mb-8 focus:border-blue-500 outline-none">
-                    <option>2025</option><option>2026</option><option>2027</option><option>2028</option>
-                </select><br>
+                    </select><br>
                 <button onclick="startApp()" class="bg-blue-600 text-white px-12 py-4 rounded-full text-xl font-bold shadow-lg hover:bg-blue-700 transition">শুরু করুন</button>
             </div>
 
